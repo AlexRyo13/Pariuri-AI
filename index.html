@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Panou de decizie - Analiza pariuri</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { background: #0A1F1A; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  .font-mono-custom { font-family: 'SF Mono', Consolas, monospace; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const LEAGUES = [
+  { key: "PL", label: "Anglia", full: "Premier League" },
+  { key: "BL", label: "Germania", full: "Bundesliga" },
+  { key: "LL", label: "Spania", full: "La Liga" },
+  { key: "SA", label: "Italia", full: "Serie A" },
+];
+
+const OUTCOME_LABELS = {
+  "1": "1 (Gazde)", "X": "X (Egal)", "2": "2 (Oaspeti)",
+  "Peste 2.5": "Peste 2.5", "Sub 2.5": "Sub 2.5",
+  "GG": "Da (GG)", "NG": "Nu (NG)",
+};
+
+const MARKET_GROUPS = {
+  "1X2": ["1", "X", "2"],
+  "Total goluri": ["Peste 2.5", "Sub 2.5"],
+  "Ambele marcheaza": ["GG", "NG"],
+};
+
+function computeEdge(modelProb, odds) {
+  if (!odds) return null;
+  return modelProb * odds - 1;
+}
+
+function verdict(edge) {
+  if (edge === null) return { key: "na", label: "FARA COTA", color: "#6B6B6B" };
+  if (edge >= 0.08) return { key: "value", label: "VALOARE", color: "#3F9142" };
+  if (edge >= 0.0) return { key: "risky", label: "RISCANT", color: "#C98A1F" };
+  return { key: "avoid", label: "EVITA", color: "#B54A3A" };
+}
+
+function bestPickForMatch(match) {
+  let best = null;
+  Object.entries(match.outcomes || {}).forEach(([label, opt]) => {
+    const edge = computeEdge(opt.modelProb, opt.odds);
+    if (edge !== null && (!best || edge > best.edge)) {
+      best = { label: OUTCOME_LABELS[label] || label, ...opt, edge };
+    }
+  });
+  return best;
+}
+
+function FormBadge({ form }) {
+  if (!form) return React.createElement("span", { className: "text-[#5E7A6E] text-xs" }, "—");
+  const colorFor = (c) => c === "W" ? "#3F9142" : c === "D" ? "#C98A1F" : "#B54A3A";
+  return React.createElement("div", { className: "flex gap-1" },
+    form.split("").map((c, i) =>
+      React.createElement("span", {
+        key: i,
+        className: "w-5 h-5 flex items-center justify-center rounded-sm text-[10px] font-mono-custom font-bold text-[#0A1F1A]",
+        style: { background: colorFor(c) }
+      }, c)
+    )
+  );
+}
+
+function OutcomeRow({ label, opt }) {
+  const edge = computeEdge(opt.modelProb, opt.odds);
+  const v = verdict(edge);
+  const modelPct = Math.round(opt.modelProb * 100);
+  const impliedPct = opt.odds ? Math.round((1 / opt.odds) * 100) : null;
+
+  return React.createElement("div", { className: "border border-[#26433A] bg-[#0E2C24]/60 rounded-sm p-3" },
+    React.createElement("div", { className: "flex items-center justify-between mb-2" },
+      React.createElement("span", { className: "text-[#F2EFE6] text-sm tracking-tight" }, OUTCOME_LABELS[label] || label),
+      React.createElement("span", {
+        className: "text-[10px] font-bold tracking-widest px-2 py-0.5 rounded-sm",
+        style: { color: v.color, border: `1px solid ${v.color}` }
+      }, v.label)
+    ),
+    React.createElement("div", { className: "flex items-end justify-between mb-1.5" },
+      React.createElement("div", null,
+        React.createElement("div", { className: "font-mono-custom text-2xl text-[#F2EFE6] leading-none" }, modelPct + "%"),
+        React.createElement("div", { className: "text-[10px] text-[#8FA89B] mt-0.5" }, "estimare model")
+      ),
+      React.createElement("div", { className: "text-right" },
+        React.createElement("div", { className: "font-mono-custom text-sm text-[#8FA89B] leading-none" },
+          opt.odds ? `cota ${opt.odds.toFixed(2)}` : "fara cota"),
+        impliedPct !== null && React.createElement("div", { className: "text-[10px] text-[#8FA89B] mt-0.5" }, `implicit ${impliedPct}%`)
+      )
+    ),
+    React.createElement("div", { className: "relative h-2 bg-[#0A1F1A] rounded-full overflow-hidden" },
+      impliedPct !== null && React.createElement("div", {
+        className: "absolute top-0 left-0 h-full rounded-full",
+        style: { width: `${impliedPct}%`, background: "#3A5348" }
+      }),
+      React.createElement("div", {
+        className: "absolute top-0 h-full w-[2px]",
+        style: { left: `${modelPct}%`, background: v.color }
+      })
+    )
+  );
+}
+
+function TeamContextCard({ name, side, ctx }) {
+  if (!ctx) return null;
+  const goalsScored = side === "home" ? ctx.goals_home_avg : ctx.goals_away_avg;
+  const goalsConceded = side === "home" ? ctx.goals_conceded_home_avg : ctx.goals_conceded_away_avg;
+  const label = side === "home" ? "acasa" : "deplasare";
+
+  return React.createElement("div", { className: "border border-[#26433A] rounded-sm p-3 flex-1 min-w-[220px]" },
+    React.createElement("div", { className: "flex items-center justify-between mb-2" },
+      React.createElement("span", { className: "text-[#F2EFE6] text-sm" }, name),
+      ctx.position && React.createElement("span", { className: "text-[10px] font-mono-custom text-[#8FA89B]" }, `loc ${ctx.position}`)
+    ),
+    React.createElement("div", { className: "text-[10px] text-[#5E7A6E] font-mono-custom mb-1" }, "FORMA (ultimele 5)"),
+    React.createElement(FormBadge, { form: ctx.form }),
+    React.createElement("div", { className: "grid grid-cols-2 gap-2 mt-3 text-center" },
+      React.createElement("div", { className: "bg-[#0E2C24]/60 rounded-sm py-2" },
+        React.createElement("div", { className: "font-mono-custom text-lg text-[#F2EFE6]" }, goalsScored?.toFixed(1) ?? "—"),
+        React.createElement("div", { className: "text-[9px] text-[#8FA89B]" }, `marcate ${label}`)
+      ),
+      React.createElement("div", { className: "bg-[#0E2C24]/60 rounded-sm py-2" },
+        React.createElement("div", { className: "font-mono-custom text-lg text-[#F2EFE6]" }, goalsConceded?.toFixed(1) ?? "—"),
+        React.createElement("div", { className: "text-[9px] text-[#8FA89B]" }, `incasate ${label}`)
+      )
+    ),
+    ctx.injuries && ctx.injuries.length > 0 && React.createElement("div", { className: "mt-3" },
+      React.createElement("div", { className: "text-[10px] text-[#C98A1F] font-mono-custom mb-1" }, "⚠ ACCIDENTARI / SUSPENDARI"),
+      React.createElement("div", { className: "space-y-1" },
+        ctx.injuries.map((p, i) =>
+          React.createElement("div", { key: i, className: "text-[11px] text-[#8FA89B]" },
+            `${p.name}${p.reason ? " — " + p.reason : ""}`)
+        )
+      )
+    )
+  );
+}
+
+function App() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [league, setLeague] = useState("PL");
+  const [selectedId, setSelectedId] = useState(null);
+
+  useEffect(() => {
+    fetch("./output.json")
+      .then((r) => { if (!r.ok) throw new Error("no file"); return r.json(); })
+      .then((json) => { setData(json); setLoading(false); })
+      .catch(() => { setError(true); setLoading(false); });
+  }, []);
+
+  useEffect(() => {
+    if (data && data[league] && data[league].length > 0) {
+      setSelectedId(data[league][0].id);
+    } else {
+      setSelectedId(null);
+    }
+  }, [league, data]);
+
+  if (loading) {
+    return React.createElement("div", { className: "min-h-screen flex items-center justify-center" },
+      React.createElement("div", { className: "text-[#3F9142]" }, "Se incarca...")
+    );
+  }
+
+  if (error || !data) {
+    return React.createElement("div", { className: "min-h-screen flex items-center justify-center p-5 text-center" },
+      React.createElement("div", { className: "text-[#8FA89B]" },
+        "Nu am gasit output.json inca. Robotul trebuie sa ruleze macar o data pentru ca datele sa apara aici.")
+    );
+  }
+
+  const matches = (data && data[league]) || [];
+  const match = matches.find((m) => m.id === selectedId) || matches[0];
+  const pick = match ? bestPickForMatch(match) : null;
+  const pickVerdict = pick ? verdict(pick.edge) : null;
+
+  return React.createElement("div", { className: "min-h-screen" },
+    React.createElement("header", { className: "px-5 py-4 border-b border-[#26433A]" },
+      React.createElement("div", { className: "text-[10px] tracking-[0.3em] text-[#5E7A6E] font-mono-custom mb-1" }, "ANALIZA MECIURI"),
+      React.createElement("h1", { className: "text-[#F2EFE6] text-2xl tracking-tight" }, "Panou de decizie"),
+      data.istoric_performanta && data.istoric_performanta.total > 0 &&
+        React.createElement("div", { className: "mt-2 text-[11px] text-[#8FA89B] font-mono-custom" },
+          `Istoric: ${data.istoric_performanta.castigate}/${data.istoric_performanta.total} reusite (${Math.round(data.istoric_performanta.rata_reusita * 100)}%)`)
+    ),
+
+    data.biletul_zilei && data.biletul_zilei.selectii?.length > 0 &&
+      React.createElement("div", { className: "px-5 py-4 border-b border-[#26433A] bg-[#0E2C24]/40" },
+        React.createElement("div", { className: "text-[10px] tracking-[0.25em] text-[#5E7A6E] font-mono-custom mb-3" }, "🎟 BILETUL ZILEI"),
+        React.createElement("div", { className: "space-y-2 mb-3" },
+          data.biletul_zilei.selectii.map((s, i) =>
+            React.createElement("div", { key: i, className: "flex items-center justify-between text-sm" },
+              React.createElement("div", null,
+                React.createElement("span", { className: "text-[#F2EFE6]" }, s.match),
+                React.createElement("span", { className: "text-[#8FA89B]" }, ` — ${OUTCOME_LABELS[s.pick] || s.pick}`)
+              ),
+              React.createElement("span", { className: "text-[#8FA89B] font-mono-custom text-xs" }, `cota ${s.odds.toFixed(2)}`)
+            )
+          )
+        ),
+        React.createElement("div", { className: "flex items-center justify-between border-t border-[#26433A] pt-2" },
+          React.createElement("span", { className: "text-[10px] text-[#8FA89B] font-mono-custom" },
+            `sansa estimata: ${Math.round(data.biletul_zilei.sansa_estimata_model * 100)}%`),
+          React.createElement("span", { className: "text-[#F2EFE6] font-mono-custom text-lg" },
+            `cota totala ${data.biletul_zilei.cota_totala.toFixed(2)}`)
+        ),
+        React.createElement("div", { className: "mt-2 text-[10px] text-[#C98A1F]" }, "⚠ " + data.biletul_zilei.avertisment)
+      ),
+
+    React.createElement("div", { className: "lg:grid lg:grid-cols-2 lg:gap-0" },
+      React.createElement("div", { className: "border-b lg:border-b-0 lg:border-r border-[#26433A]" },
+        React.createElement("div", { className: "flex border-b border-[#26433A] overflow-x-auto" },
+          LEAGUES.map((lg) => {
+            const active = lg.key === league;
+            return React.createElement("button", {
+              key: lg.key,
+              onClick: () => setLeague(lg.key),
+              className: `flex-1 min-w-[90px] px-3 py-3 text-center border-b-2 transition-colors ${active ? "border-[#3F9142] bg-[#0E2C24]" : "border-transparent"}`
+            },
+              React.createElement("div", { className: `text-sm ${active ? "text-[#F2EFE6]" : "text-[#8FA89B]"}` }, lg.label),
+              React.createElement("div", { className: "text-[9px] text-[#5E7A6E] font-mono-custom" }, lg.full)
+            );
+          })
+        ),
+        React.createElement("div", { className: "divide-y divide-[#26433A]" },
+          matches.length === 0 && React.createElement("div", { className: "px-5 py-6 text-[#8FA89B] text-sm" },
+            "Niciun meci disponibil momentan pentru aceasta liga."),
+          matches.map((m) => {
+            const mPick = bestPickForMatch(m);
+            const mVerdict = mPick ? verdict(mPick.edge) : null;
+            const active = m.id === selectedId;
+            return React.createElement("button", {
+              key: m.id,
+              onClick: () => setSelectedId(m.id),
+              className: `w-full text-left px-5 py-3 flex items-center justify-between ${active ? "bg-[#1B5E3F]/40" : ""}`
+            },
+              React.createElement("div", null,
+                React.createElement("div", { className: "text-[#F2EFE6] text-sm" }, `${m.home} – ${m.away}`),
+                React.createElement("div", { className: "text-[10px] text-[#8FA89B] font-mono-custom" }, m.kickoff)
+              ),
+              mVerdict && React.createElement("span", {
+                className: "text-[9px] font-bold tracking-widest px-2 py-0.5 rounded-sm flex-shrink-0",
+                style: { color: mVerdict.color, border: `1px solid ${mVerdict.color}` }
+              }, mVerdict.label)
+            );
+          })
+        )
+      ),
+
+      React.createElement("div", { className: "px-5 py-4" },
+        !match ? React.createElement("div", { className: "text-[#8FA89B] text-sm py-10 text-center" },
+          "Selecteaza un meci din lista pentru a vedea analiza completa.")
+        : React.createElement(React.Fragment, null,
+            React.createElement("div", { className: "mb-4" },
+              React.createElement("div", { className: "text-[#F2EFE6] text-lg tracking-tight" }, `${match.home} – ${match.away}`),
+              React.createElement("div", { className: "text-[11px] text-[#8FA89B] font-mono-custom" }, match.kickoff)
+            ),
+            pick && React.createElement("div", {
+              className: "rounded-sm p-4 border mb-5",
+              style: { borderColor: pickVerdict.color, background: `${pickVerdict.color}14` }
+            },
+              React.createElement("div", { className: "text-[10px] tracking-[0.25em] text-[#8FA89B] font-mono-custom mb-1" }, "PRONOSTIC AI"),
+              React.createElement("div", { className: "text-[#F2EFE6] text-sm tracking-tight" },
+                "Cea mai buna optiune: ",
+                React.createElement("span", { style: { color: pickVerdict.color } }, pick.label),
+                ` (cota ${pick.odds.toFixed(2)}, edge +${Math.round(pick.edge * 100)}%)`)
+            ),
+            match.context && React.createElement("div", { className: "mb-5" },
+              React.createElement("div", { className: "text-[11px] tracking-[0.2em] text-[#5E7A6E] font-mono-custom mb-2" }, "CONTEXT ECHIPE"),
+              React.createElement("div", { className: "flex flex-col sm:flex-row gap-2.5" },
+                React.createElement(TeamContextCard, { name: match.home, side: "home", ctx: match.context.home }),
+                React.createElement(TeamContextCard, { name: match.away, side: "away", ctx: match.context.away })
+              )
+            ),
+            React.createElement("div", { className: "space-y-5" },
+              Object.entries(MARKET_GROUPS).map(([groupName, keys]) =>
+                React.createElement("div", { key: groupName },
+                  React.createElement("div", { className: "text-[11px] tracking-[0.2em] text-[#5E7A6E] font-mono-custom mb-2" }, groupName.toUpperCase()),
+                  React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-2.5" },
+                    keys.map((k) => match.outcomes?.[k] &&
+                      React.createElement(OutcomeRow, { key: k, label: k, opt: match.outcomes[k] }))
+                  )
+                )
+              )
+            )
+          )
+      )
+    ),
+
+    React.createElement("div", { className: "px-5 py-4 flex gap-4 flex-wrap border-t border-[#26433A]" },
+      [
+        { c: "#3F9142", t: "Verde — valoare reala" },
+        { c: "#C98A1F", t: "Galben — risc moderat" },
+        { c: "#B54A3A", t: "Rosu — evita" },
+      ].map((l) => React.createElement("div", { key: l.t, className: "flex items-center gap-1.5 text-[11px] text-[#8FA89B]" },
+        React.createElement("span", { className: "w-2.5 h-2.5 rounded-full", style: { background: l.c } }),
+        l.t
+      ))
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+</script>
+</body>
+</html>
