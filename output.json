@@ -1,7 +1,18 @@
 {
-  "generated_at": "2026-08-30T12:24:03.916586+00:00",
+  "generated_at": "2026-08-30T16:32:04.930085+00:00",
   "PL": [],
   "BL": [],
   "LL": [],
-  "SA": []
+  "SA": [],
+  "biletul_zilei": {
+    "selectii": [],
+    "cota_totala": 1.0,
+    "sansa_estimata_model": 1.0,
+    "avertisment": "Un bilet cu mai multe selectii inmulteste riscul, nu il aduna. Sansa combinata scade mult sub sansa fiecarei selectii individuale."
+  },
+  "istoric_performanta": {
+    "total": 0,
+    "castigate": 0,
+    "rata_reusita": null
+  }
 }
