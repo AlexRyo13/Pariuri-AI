@@ -1,0 +1,36 @@
+# Pune acest fisier in repo-ul tau la: .github/workflows/daily-run.yml
+# Ruleaza scriptul zilnic, gratis, prin GitHub Actions.
+
+name: Analiza zilnica pariuri
+
+on:
+  schedule:
+    - cron: "0 7 * * *"   # 07:00 UTC in fiecare zi (ajusteaza dupa nevoie)
+  workflow_dispatch: {}     # iti permite si rulare manuala din tab-ul Actions
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instaleaza dependinte
+        run: pip install requests
+
+      - name: Ruleaza pipeline-ul
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+        run: python daily_pipeline.py
+
+      - name: Salveaza output.json in repo
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add output.json
+          git commit -m "Actualizare zilnica analiza" || echo "Nimic de comis"
+          git push
